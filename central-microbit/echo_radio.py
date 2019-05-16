@@ -15,3 +15,5 @@ while True:
     response = radio.receive()
     if response:
         microbit.display.scroll(last_text + ' <- ' + response, loop=True, wait=False)
+        # print(''.join(reversed(response)))
+        print(response.strip())
