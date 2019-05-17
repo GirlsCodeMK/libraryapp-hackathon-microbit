@@ -1,11 +1,15 @@
 import radio
 import microbit
 
-ID = 1
+ID = 11
+
+radio.config(length=250, channel=12)
 
 microbit.display.scroll(('Waiting ' + str(ID)), loop=True, wait=False)
 
 radio.on()
+
+old_message = ''
 
 while True:
     rcvd = radio.receive()
@@ -21,6 +25,8 @@ while True:
 
         if int(received.get('id', 0)) == ID:
             if 'message' in received:
-                microbit.display.scroll(received['message'], loop=True, wait=False)
+                if received['message'] != old_message:
+                    microbit.display.scroll(received['message'], loop=True, wait=False)
+                    old_message = received['message']
             microbit.sleep(100)
             radio.send('ack:{}'.format(ID))
