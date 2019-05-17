@@ -14,7 +14,6 @@ auth_headers = {'Authorization': 'Token {}'.format(config['DEFAULT']['token'])}
 
 port1 = '/dev/ttyACM0'
 
-
 lock = asyncio.Lock()
 known_microbits = {}
 
@@ -37,7 +36,7 @@ async def serial_creator():
 
 async def find_microbits(session):
     """Find all the microbits known in the api and create a new version of 
-    `known_microbits` that stsores them."""
+    `known_microbits` that stores them."""
     global known_microbits
     found_items = {}
 
@@ -81,70 +80,58 @@ async def find_microbits(session):
             print('{}\t{}\t{}'.format(mb, 
                 known_microbits[mb]['microbit_id'],
                 known_microbits[mb]['last_update']))
-        # print(known_microbits)
 
 
 async def generate_messages(queue):
-    while True:
-        with await lock:
-            for mb in known_microbits:
-                id = known_microbits[mb]['microbit_id']
-                msg = known_microbits[mb]['message']
-                transmission = f"id:{id};message:{msg}"
-                await queue.put(transmission)
-                print(f'Enqueued {transmission}')
-        await asyncio.sleep(1.0)
+    """Generate messages to send to the microbits. Relies on the queue
+    being a small, fixed size to avoid overwhelming the system."""
+    with await lock:
+        for mb in known_microbits:
+            id = known_microbits[mb]['microbit_id']
+            msg = known_microbits[mb]['message']
+            transmission = f"id:{id};message:{msg}"
+            await queue.put(transmission)
+            print(f'Enqueued {transmission}')
+    await asyncio.sleep(1.0)
 
 
 async def serial_writer(queue, writer):
-    print('Writer created')
-    while True:
-        try:
-            message = queue.get_nowait()
-        except asyncio.QueueEmpty:
-            message = ''
-        print(f'Serial write {message}')
-        written = message + '\r\n'
-        writer.write(written.encode('utf-8'))
-        if message != '':
-            queue.task_done()
-        await asyncio.sleep(0.5)
+    """Take messages from the queue and write them to the attached microbit"""
+    try:
+        message = queue.get_nowait()
+    except asyncio.QueueEmpty:
+        message = ''
+    print(f'Serial write {message}')
+    written = message + '\r\n'
+    writer.write(written.encode('utf-8'))
+    if message != '':
+        queue.task_done()
+    await asyncio.sleep(0.5)
 
 
 async def serial_reader(reader, session):
-    print('Reader created')
-    while True:
-        #msg = await reader.readuntil(b'\n')
-        msg = await reader.readline()
-        message = msg.decode('utf-8').strip()
-        print(f'Received {message}')
-        if message.startswith('ack:'):
-            responding_microbit_id = int(message.split(':')[1].strip())
-            with await lock:
-                for mb in known_microbits:
-                    if known_microbits[mb]['microbit_id'] == responding_microbit_id:
-                        update_time = datetime.datetime.now(datetime.timezone.utc)
-                        async with session.patch(mb, 
-                                headers=auth_headers, 
-                                data={'last_microbit_update': update_time}
-                                ) as response:
-                            print('Updated MB {} at {}, with response {}'.format(
-                                known_microbits[mb]['microbit_id'], mb, 
-                                response.status))
+    """Read messages from the attached microbit. If they're `ack` messages,
+    update the server with the time of acknowledgement."""
+    msg = await reader.readline()
+    message = msg.decode('utf-8').strip()
+    print(f'Received {message}')
+    if message.startswith('ack:'):
+        responding_microbit_id = int(message.split(':')[1].strip())
+        with await lock:
+            for mb in known_microbits:
+                if known_microbits[mb]['microbit_id'] == responding_microbit_id:
+                    update_time = datetime.datetime.now(datetime.timezone.utc)
+                    # Or use this version if you're not interested in the result of the PATCH
+                    # await session.patch(mb, headers=auth_headers, 
+                    #        data={'last_microbit_update': update_time})
+                    async with session.patch(mb, 
+                            headers=auth_headers, 
+                            data={'last_microbit_update': update_time}
+                            ) as response:
+                        print('Updated MB {} at {}, with response {}'.format(
+                            known_microbits[mb]['microbit_id'], mb, 
+                            response.status))
 
-
-
-
-# async def ping_microbits(session):
-#     """Update the status of a microbit after it's returned a radio message"""
-#     with await lock:
-#         for mb in known_microbits:
-#             update_time = datetime.datetime.now(datetime.timezone.utc)
-#             async with session.patch(mb, 
-#                     headers=auth_headers, 
-#                     data={'last_microbit_update': update_time}) as response:
-#                 print('Updated MB {} at {}, with response {}'.format(
-#                     known_microbits[mb]['microbit_id'], mb, response.status))
 
 
 async def find_microbits_loop(session):
@@ -152,10 +139,19 @@ async def find_microbits_loop(session):
         await find_microbits(session)
         await asyncio.sleep(5)
 
-# async def ping_microbits_loop(session):
-#     while True:
-#         await ping_microbits(session)
-#         await asyncio.sleep(2)
+async def generate_messages_loop(queue):
+    while True:
+        await generate_messages(queue)
+
+async def serial_writer_loop(queue, writer):
+    print('Reader created')
+    while True:
+        await serial_writer(queue, writer)
+
+async def serial_reader_loop(reader, session):
+    print('Writer created')
+    while True:
+        await serial_reader(reader, session)
 
 
 async def api_handler():
@@ -163,24 +159,18 @@ async def api_handler():
     queue = asyncio.Queue(maxsize=5)
 
     async with aiohttp.ClientSession() as session:
-        consumer = asyncio.ensure_future(serial_writer(queue, writer))
+        consumer = asyncio.ensure_future(serial_writer_loop(queue, writer))
         await asyncio.gather(
-            generate_messages(queue), 
-            serial_reader(reader, session),
+            generate_messages_loop(queue), 
+            serial_reader_loop(reader, session),
             find_microbits_loop(session),
             )
         await queue.join()
         consumer.cancel()
 
 
-
-
 event_loop = asyncio.get_event_loop()
 try:
-    # event_loop.run_until_complete(find_microbits())
-    # print(lock.locked())
-    # print(known_microbits)
     event_loop.run_until_complete(api_handler())
-    # event_loop.run_until_complete(ping_microbits())
 finally:
     event_loop.close()
