@@ -1,6 +1,8 @@
 import radio
 import microbit
 
+radio.config(length=250, channel=12)
+
 radio.on()
 radio.send('Ready')
 

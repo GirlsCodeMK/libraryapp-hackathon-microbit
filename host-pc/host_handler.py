@@ -45,13 +45,13 @@ async def keyboard_input(queue):
 
 async def generate_messages(queue):
     for msg in [
-                # {'id': 1, 'message': 'tom'}, 
+                {'id': 1, 'message': 'tom'}, 
                 {'id': 2, 'message': 'alice'},
-                # {'id': 1, 'message': 'dick'},
-                # {'id': 2, 'message': 'bea'},
-                # {'id': 1, 'message': 'harry'},
-                # {'id': 2, 'message': 'claire'},
-                # {'id': 1, 'message': 'john'},
+                {'id': 1, 'message': 'dick'},
+                {'id': 2, 'message': 'bea'},
+                {'id': 1, 'message': 'harry'},
+                {'id': 2, 'message': 'claire'},
+                {'id': 1, 'message': 'john'},
                 ]:
         await asyncio.sleep(3 + random.random())
         transmission = f"id:{msg['id']};message:{msg['message']}"
